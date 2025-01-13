@@ -1,0 +1,18 @@
+[package]
+name = "doip-server"
+version = "0.1.0"
+authors = ["Samuel Preston <samp.reston@outlook.com>"]
+edition = "2021"
+description = "Diagnostics over Internet Protocol server implementation."
+readme = "README.md"
+repository = "https://github.com/samp-reston/doip-server"
+license = "MIT"
+keywords = ["doip", "diagnostics", "vehicle", "server"]
+categories = ["simulation", "network-programming"]
+
+[dependencies]
+
+[profile.release]
+strip = true      # Automatically strip symbols from the binary.
+lto = true
+codegen-units = 1
