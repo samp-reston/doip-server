@@ -4,9 +4,9 @@ use doip_codec::EncodeError;
 use doip_definitions::{
     header::{DoipPayload, DoipVersion, PayloadType},
     message::{
-        ActionCode, EntityStatusResponse, GenericNack, NackCode, PowerInformationResponse,
-        SyncStatus, VehicleAnnouncementMessage, VehicleIdentificationRequestEid,
-        VehicleIdentificationRequestVin,
+        ActionCode, DoipMessage, EntityStatusResponse, GenericNack, NackCode,
+        PowerInformationResponse, SyncStatus, VehicleAnnouncementMessage,
+        VehicleIdentificationRequestEid, VehicleIdentificationRequestVin,
     },
 };
 use doip_sockets::udp::UdpSocket;
@@ -33,40 +33,46 @@ impl UdpServer {
         loop {
             let (res, addr) = self.socket.recv().await.unwrap().unwrap();
 
-            let _ = match res.header.payload_type {
-                PayloadType::VehicleIdentificationRequest => {
-                    self.send_vehicle_announcement(addr).await
-                }
-                PayloadType::VehicleIdentificationRequestEid => {
-                    match VehicleIdentificationRequestEid::from_bytes(&res.payload.to_bytes()) {
-                        Ok(vir_eid) => {
-                            if vir_eid.eid == self.config.eid {
-                                self.send_vehicle_announcement(addr).await
-                            } else {
-                                Ok(())
-                            }
+            let _ = self.handle_message(res, addr).await;
+        }
+    }
+
+    async fn handle_message(
+        &mut self,
+        res: DoipMessage,
+        addr: SocketAddr,
+    ) -> Result<(), EncodeError> {
+        match res.header.payload_type {
+            PayloadType::VehicleIdentificationRequest => self.send_vehicle_announcement(addr).await,
+            PayloadType::VehicleIdentificationRequestEid => {
+                match VehicleIdentificationRequestEid::from_bytes(&res.payload.to_bytes()) {
+                    Ok(vir_eid) => {
+                        if vir_eid.eid == self.config.eid {
+                            self.send_vehicle_announcement(addr).await
+                        } else {
+                            Ok(())
                         }
-                        Err(_) => Ok(()),
                     }
+                    Err(_) => Ok(()),
                 }
-                PayloadType::VehicleIdentificationRequestVin => {
-                    match VehicleIdentificationRequestVin::from_bytes(&res.payload.to_bytes()) {
-                        Ok(vir_vin) => {
-                            if vir_vin.vin == self.config.vin {
-                                self.send_vehicle_announcement(addr).await
-                            } else {
-                                Ok(())
-                            }
+            }
+            PayloadType::VehicleIdentificationRequestVin => {
+                match VehicleIdentificationRequestVin::from_bytes(&res.payload.to_bytes()) {
+                    Ok(vir_vin) => {
+                        if vir_vin.vin == self.config.vin {
+                            self.send_vehicle_announcement(addr).await
+                        } else {
+                            Ok(())
                         }
-                        Err(_) => Ok(()),
                     }
+                    Err(_) => Ok(()),
                 }
-                PayloadType::EntityStatusRequest => self.send_entity_status_response(addr).await,
-                PayloadType::PowerInformationRequest => {
-                    self.send_power_information_response(addr).await
-                }
-                _ => self.send_generic_nack(addr).await,
-            };
+            }
+            PayloadType::EntityStatusRequest => self.send_entity_status_response(addr).await,
+            PayloadType::PowerInformationRequest => {
+                self.send_power_information_response(addr).await
+            }
+            _ => self.send_generic_nack(addr).await,
         }
     }
 
