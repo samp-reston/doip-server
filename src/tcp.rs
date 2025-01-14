@@ -1,7 +1,13 @@
 use std::io;
 
 use crate::ServerConfig;
-use doip_definitions::message::{ActivationCode, RoutingActivationResponse};
+use doip_definitions::{
+    header::{DoipPayload, PayloadType},
+    message::{
+        ActivationCode, AliveCheckResponse, DoipMessage, GenericNack, NackCode,
+        RoutingActivationRequest, RoutingActivationResponse,
+    },
+};
 use doip_sockets::tcp::{TcpListener, TcpSocket, TcpStream};
 
 pub struct TcpServer {
@@ -18,32 +24,91 @@ impl TcpServer {
         Ok(TcpServer { config, listener })
     }
 
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         println!("Listening on: {}", self.listener.get_ref().local_addr()?);
 
         loop {
             let (stream, addr) = self.listener.accept().await?;
             println!("New connection from: {}", addr);
-            let config_clone = self.config.clone();
 
-            tokio::task::spawn(async move { handle_connection(stream, config_clone).await });
+            tokio::task::spawn(
+                async move { TcpConnection::new(stream, self.config).await.run().await },
+            );
         }
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, config: ServerConfig) {
-    while let Some(res) = stream.read().await {
-        println!("Message: {:?}", res.unwrap().header.payload_type);
+struct TcpConnection {
+    config: ServerConfig,
+    stream: TcpStream,
+}
 
-        let payload = RoutingActivationResponse {
-            logical_address: config.logical_address,
-            source_address: [0x10, 0x11],
-            activation_code: ActivationCode::SuccessfullyActivated,
-            buffer: [0x00, 0x00, 0x00, 0x00],
+impl TcpConnection {
+    pub async fn new(stream: TcpStream, config: ServerConfig) -> Self {
+        TcpConnection { config, stream }
+    }
+
+    pub async fn run(&mut self) {
+        while let Some(Ok(res)) = self.stream.read().await {
+            println!("Message: {:?}", res.header.payload_type);
+            let _ = self.handle_message(res).await;
+        }
+    }
+
+    async fn handle_message(&mut self, msg: DoipMessage) {
+        match msg.header.payload_type {
+            PayloadType::RoutingActivationRequest => {
+                let routing_req =
+                    RoutingActivationRequest::from_bytes(&msg.payload.to_bytes()).unwrap();
+
+                self.send_routing_activation_response(routing_req).await
+            }
+            PayloadType::AliveCheckRequest => self.send_alive_check_response().await,
+            PayloadType::DiagnosticMessage => self.handle_diagnostic_message().await,
+            _ => {
+                self.send_generic_nack(NackCode::IncorrectPatternFormat)
+                    .await
+            }
+        }
+    }
+
+    async fn send_generic_nack(&mut self, nack_code: NackCode) {
+        let _ = self.stream.send(GenericNack { nack_code }).await;
+    }
+
+    async fn send_routing_activation_response(&mut self, payload: RoutingActivationRequest) {
+        let activation_code = match payload.activation_type {
+            doip_definitions::message::ActivationType::Default => {
+                ActivationCode::SuccessfullyActivated
+            }
+            _ => ActivationCode::DeniedMissingAuthentication,
         };
 
-        let _ = stream.send(payload).await;
+        let _ = self
+            .stream
+            .send(RoutingActivationResponse {
+                logical_address: payload.source_address,
+                source_address: self.config.logical_address,
+                activation_code,
+                buffer: [0x00, 0x00, 0x00, 0x00],
+            })
+            .await;
     }
+
+    async fn send_alive_check_response(&mut self) {
+        let _ = self
+            .stream
+            .send(AliveCheckResponse {
+                source_address: self.config.logical_address,
+            })
+            .await;
+    }
+
+    async fn handle_diagnostic_message(&mut self) {}
+
+    async fn send_diagnostic_message(&mut self) {}
+    async fn send_diagnostic_message_ack(&mut self) {}
+    async fn send_diagnostic_message_nack(&mut self) {}
 }
 
 #[cfg(test)]
