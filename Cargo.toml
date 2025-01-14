@@ -11,6 +11,10 @@ keywords = ["doip", "diagnostics", "vehicle", "server"]
 categories = ["simulation", "network-programming"]
 
 [dependencies]
+doip-codec = "2.0.2"
+doip-definitions = "1.0.3"
+doip-sockets = "0.2.2"
+tokio = "1.43.0"
 
 [profile.release]
 strip = true      # Automatically strip symbols from the binary.
